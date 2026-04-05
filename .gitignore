@@ -1,0 +1,24 @@
+# --- Python 相關 ---
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.env
+
+# --- 專案資料 (Excel 檔案) ---
+# 排除特定的資料檔案，保護個人隱私資訊
+data/enrollment.xlsx
+data/surrender.xlsx
+data/protected.xlsx
+
+# 如果你想排除 data 資料夾下所有的 excel，可以取消下面這行的註解
+# data/*.xlsx
+
+# --- 紀錄檔 (Logs) ---
+# 排除 log 資料夾及其內部所有檔案
+log/
+*.log
+
+# --- 作業系統相關 ---
+.DS_Store
+Thumbs.db
