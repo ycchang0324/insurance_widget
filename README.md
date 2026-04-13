@@ -11,6 +11,9 @@
 
 ## ✨ 功能亮點
 
+* **一鍵環境初始化**：透過 Bash 腳本自動開啟具備遠端除錯模式的 Chrome，並配置獨立的使用者設定檔。
+* **自動化登入輔助**：自動填寫保單序號、身分證字號及密碼，並智慧偵測登入狀態。
+* **互動式任務選單**：登入成功後可直接在終端機選擇執行「加保」或「退保」任務。
 * **民國年自動轉換**：內建工具函式，將 Excel 西元日期自動轉為系統要求的 `115/04/03` 格式。
 * **全流程手動確認**：
     * **啟動檢查**：程式啟動後會暫停，待人工確認網頁加載完成後按 `Enter` 才會開始。
@@ -26,19 +29,13 @@
 ```bash
 pip3 install requirements.txt
 ```
-
-### 2. Chrome 遠端除錯模式
-本腳本使用「接管現有瀏覽器」模式，先手動創造瀏覽器後手動登入，完成後再讓腳本進行加保退保動作。
-1. 關閉所有 Chrome 視窗。
-2. 透過終端機啟動具備偵測埠的 Chrome：
-   * **macOS**:
-       ```bash
-       /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --remote-debugging-port=9222 --user-data-dir="~/ChromeProfile"
-       ```
-   * **Windows**:
-       ```cmd
-       chrome.exe --remote-debugging-port=9222 --user-data-dir="C:\selenum\AutomationProfile"
-       ```
+### 2. 環境變數設定 (.env)
+請在專案根目錄建立 .env 檔案，並填入您的登入資訊（此檔案已被 .gitignore 排除，請放心使用）：
+```bash
+FUBON_POLICY_NO=您的保單號碼-序號
+FUBON_USER_ACCOUNT=您的身分證字號
+FUBON_USER_PASSWORD=您的登入密碼
+```
 
 ---
 
@@ -47,19 +44,24 @@ pip3 install requirements.txt
 ```bash
 insurance/
 ├── 📁 data/                        # 資料存放區 (Excel 資料庫)
-│   ├── 📄 enrollment.xlsx                 # [🔒 隱私] 實際加保人員名單
-│   ├── 📄 enrollment_example.xlsx         # 💡 加保 Excel 範本 (供參考格式)
-│   ├── 📄 surrender.xlsx              # [🔒 隱私] 實際退保人員名單
-│   ├── 📄 surrender_example.xlsx      # 💡 退保 Excel 範本 (供參考格式)
-│   ├── 📄 protected.xlsx          # [🔒 隱私] 保護名單 (名單內成員不可退保)
-│   └── 📄 protected_example.xlsx  # 💡 保護名單範本
+│   ├── 📄 enrollment.xlsx          # [🔒 隱私] 實際加保人員名單
+│   ├── 📄 enrollment_example.xlsx  # 💡 加保 Excel 範本 (供參考格式)
+│   ├── 📄 surrender.xlsx           # [🔒 隱私] 實際退保人員名單
+│   ├── 📄 surrender_example.xlsx   # 💡 退保 Excel 範本 (供參考格式)
+│   ├── 📄 protected.xlsx           # [🔒 隱私] 保護名單 (名單內成員不可退保)
+│   └── 📄 protected_example.xlsx   # 💡 保護名單範本
 ├── 📁 log/                         # 系統日誌紀錄
-│   └── 📄 execution_enrollment.log            # 自動生成的加保執行過程與錯誤紀錄
-│   └── 📄 execution_surrender.log            # 自動生成的退保執行過程與錯誤紀錄
-├── 📁 src/                        # 工具程式資料夾
-│   ├── 🐍 utility.py                 # 工具程式（西元民國日期轉換、等待遮罩）
-├── 🐍 enrollment.py                       # 核心腳本：員工加保自動化流程
-├── 🐍 surrender.py                    # 核心腳本：員工退保自動化流程
+│   ├── 📄 execution_login.log      # 登入過程紀錄
+│   ├── 📄 execution_enrollment.log # 自動生成的加保執行過程與錯誤紀錄
+│   └── 📄 execution_surrender.log  # 自動生成的退保執行過程與錯誤紀錄
+├── 📁 src/                         # 工具程式資料夾
+│   └── 🐍 utility.py               # 工具程式（西元民國日期轉換、等待遮罩）
+├── 🐍 fubon_login.py               # 登入輔助：自動填寫帳密並偵測登入
+├── 🐍 enrollment.py                # 核心腳本：員工加保自動化流程
+├── 🐍 surrender.py                 # 核心腳本：員工退保自動化流程
+├── 📄 .env                         # [🔒 隱私] 登入資訊及環境變數
+├── 📄 .env_example                 # 登入資訊及環境變數範本
+├── 🐚 run_fubon.sh                 # 啟動腳本：一鍵開啟 Chrome 與執行任務
 ├── 📝 README.md                    # 專案說明文件與使用指南
 ├── 📋 requirements.txt             # 專案依賴套件清單 (pip install)
 └── 🚫 .gitignore                   # Git 忽略設定 (確保敏感個資不外流)
@@ -73,34 +75,38 @@ insurance/
 
 * **退保**：使用 `surrender.xlsx`（包含員工姓名、身分證字號、退保日期）。另外`protected.xlsx`（包含員工姓名、身分證字號）是受保護名單，不會被退保。 
 
-#### 填寫規範與注意事項 (Guidelines)
-
-🛡️ 保險金額預設：
-
-GADD (團體意外傷害險)：預設填寫 100。
-
-GMR (意外醫療附加條款)：預設填寫 2。
-
-🌏 國籍與身分驗證：
-
-本國籍：若國籍為「中華民國」，可免填「護照英文名字」。
-
-外籍人士：若無身分證字號或居留證，系統無法受理自動化，請採取手寫保單處理。
 
 ### 第二步：啟動自動化
-1. 在 Chrome 中手動登入富邦 GIS 目標功能頁面。
-2. 執行腳本：
 
-#### 加保
-   ```bash
+#### 已登入系統
+1. 直接執行腳本
+
+**加保**
+```bash
    python3 enrollment.py
-   ```
+```
 
-#### 退保
-   ```bash
+**退保**
+```bash
    python3 surrender.py
-   ```
-3. 當終端機顯示 `👉 網頁就緒後，請在此按『Enter』開始執行...` 時，切換到網頁確認加載完成後按下 Enter。
+```
+
+2. 當終端機顯示 👉 網頁就緒後，請在此按『Enter』開始執行... 時，切換到網頁確認加載完成後按下 Enter。
+
+#### 若尚未登入系統
+
+1. 請先將所有的瀏覽器關閉
+
+2. 在終端機中，執行啟動腳本：
+```bash
+   python3 fubon_login.py
+```
+
+此腳本會依序執行：
+1. **啟動 Chrome**：開啟一個專用的瀏覽器。
+2. **自動填表**：自動開啟登入頁並填好保單序號、帳號、密碼。（若已登入則會自動跳過）
+3. **手動登入**：請您手動輸入網頁驗證碼並點擊登入。（若已登入則會自動跳過）
+4. **任務選擇**：程式偵測到登入成功後，會詢問您要執行 [e] 增員 還是 [s] 退保，當終端機顯示 `👉 網頁就緒後，請在此按『Enter』開始執行...` 時，切換到網頁確認加載完成後按下 Enter。
 
 ### 第三步：核對與確認
 * 腳本會自動填寫所有欄位並捲動到「確定」按鈕。
@@ -108,6 +114,14 @@ GMR (意外醫療附加條款)：預設填寫 2。
 * 在終端機按 **Enter**，程式將點擊送出並進入下一位人員。
 
 ---
+
+### 🌏 加保資料注意事項：
+
+本國籍：若國籍為「中華民國」，可免填「護照英文名字」。
+
+外籍人士：若無身分證字號或居留證，系統無法受理自動化，請採取手寫保單處理。
+
+保險金額預設：GADD (團體意外傷害險)：預設填寫 100，GMR (意外醫療附加條款)：預設填寫 2。
 
 ### 📋 授權與免責
 本腳本僅供內部行政效率提升使用。自動化執行期間請務必全程留守，並對最終送出的資料準確性負責。

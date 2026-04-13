@@ -1,3 +1,10 @@
+#網頁自動化工具
 selenium==4.18.1
+
+#資料處理與 Excel 讀取
 pandas==2.2.1
 openpyxl==3.1.2
+
+#環境變數管理 (.env 支援)
+
+python-dotenv==1.0.0
