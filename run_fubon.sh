@@ -31,7 +31,7 @@ if lsof -Pi :$DEBUG_PORT -sTCP:LISTEN -t >/dev/null ; then
         echo ""
         echo "--------------------------------------------------"
         echo "🔑 登入成功，請選擇後續要執行的自動化任務："
-        echo " [e] 執行增員 (enrollment.py)"
+        echo " [e] 執行加保 (enrollment.py)"
         echo " [s] 執行退保 (surrender.py)"
         echo " [any] 按其他任意鍵結束腳本"
         echo "--------------------------------------------------"
@@ -39,7 +39,7 @@ if lsof -Pi :$DEBUG_PORT -sTCP:LISTEN -t >/dev/null ; then
 
         case $user_choice in
             [eE] )
-                echo "🚀 正在啟動 增員自動化 ($ENROLL_FILE)..."
+                echo "🚀 正在啟動 加保自動化 ($ENROLL_FILE)..."
                 python3 "$ENROLL_FILE"
                 ;;
             [sS] )

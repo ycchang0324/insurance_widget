@@ -99,7 +99,7 @@ insurance/
 
 2. 在終端機中，執行啟動腳本：
 ```bash
-   python3 fubon_login.py
+   bash run_fubon.sh
 ```
 
 此腳本會依序執行：
