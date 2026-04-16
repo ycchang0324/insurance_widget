@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 def fill_fubon_surrender(driver, data):
     wait = WebDriverWait(driver, 10)
     
-    # A. 選擇身分證 Radio
+    # A. 選擇身分證 Radio (使用 JS 避免被遮罩)
     radio_xpath = "//input[@type='radio' and @value='2']"
     radio_btn = wait.until(EC.presence_of_element_located((By.XPATH, radio_xpath)))
     driver.execute_script("arguments[0].click();", radio_btn)
@@ -34,17 +34,23 @@ def fill_fubon_surrender(driver, data):
     # B. 填寫身分證
     id_field = wait.until(EC.presence_of_element_located((By.XPATH, "//input[@maxlength='10']")))
     target_id = str(data.get('身分證字號', '')).strip()
+    
+    # 清除舊內容並輸入
+    id_field.clear() 
     driver.execute_script("arguments[0].value = arguments[1];", id_field, target_id)
     driver.execute_script("arguments[0].dispatchEvent(new Event('input', { bubbles: true }));", id_field)
     id_field.send_keys(Keys.ENTER)
+    
+    # 重要：等待身分證檢核完成，且下拉選單變為可點擊
     wait_for_spinner_to_disappear(driver)
-
-    # C. 選擇變更項目
-    dropdown = wait.until(EC.element_to_be_clickable((By.XPATH, "//div[@title='請選擇']")))
+    
+    # C. 選擇變更項目 (改用更穩定的 XPATH)
+    dropdown = wait.until(EC.element_to_be_clickable((By.XPATH, "//div[contains(@class, 'ant-select-selection')]//div[@title='請選擇']")))
     driver.execute_script("arguments[0].click();", dropdown)
     
+    # 等待選項出現並點擊
     option_xpath = "//li[contains(text(), '員工及眷屬退保')]"
-    target_option = wait.until(EC.element_to_be_clickable((By.XPATH, option_xpath)))
+    target_option = wait.until(EC.visibility_of_element_located((By.XPATH, option_xpath)))
     driver.execute_script("arguments[0].click();", target_option)
 
     # D. 下一步
@@ -53,30 +59,28 @@ def fill_fubon_surrender(driver, data):
     driver.execute_script("arguments[0].click();", next_btn)
     wait_for_spinner_to_disappear(driver)
 
-    # E. 填寫日期 (使用 utility 轉換)
+    # E. 填寫日期
     date_xpath = "//div[contains(., '退保/離職日期')]/following::input[@class='mx-input']"
-    date_field = wait.until(EC.element_to_be_clickable((By.XPATH, date_xpath)))
+    date_field = wait.until(EC.presence_of_element_located((By.XPATH, date_xpath)))
     target_date = convert_to_roc_date(data.get('退保日期', ''))
     
+    # 填寫日期並觸發網頁事件
     driver.execute_script("""
         arguments[0].value = arguments[1];
         arguments[0].dispatchEvent(new Event('input', { bubbles: true }));
         arguments[0].dispatchEvent(new Event('change', { bubbles: true }));
-        arguments[0].dispatchEvent(new Event('blur', { bubbles: true }));
     """, date_field, target_date)
-    
-    # F. 勾選方格與收合日曆
-    checkbox_xpath = "//label[contains(@class, 'user__check') and contains(@class, 'ant-checkbox-wrapper')]"
-    checkbox = wait.until(EC.element_to_be_clickable((By.XPATH, checkbox_xpath)))
+    date_field.send_keys(Keys.ENTER) # 多補一個 Enter 嘗試收合日曆
+
+    # F. 勾選方格 (JS 點擊最穩)
+    checkbox_xpath = "//label[contains(@class, 'ant-checkbox-wrapper')]"
+    checkbox = wait.until(EC.presence_of_element_located((By.XPATH, checkbox_xpath)))
     driver.execute_script("arguments[0].click();", checkbox)
     
-    info_txt = driver.find_element(By.XPATH, "//p[contains(@class, 'info__txt')]")
-    actions = ActionChains(driver)
-    actions.move_to_element(info_txt).click().perform()
-    
-    # G. 捲動到確定按鈕
+    # G. 確保捲動到確定按鈕
     confirm_btn = wait.until(EC.presence_of_element_located((By.XPATH, "//button[contains(text(), '確定')]")))
     driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", confirm_btn)
+    
     return confirm_btn
 
 # --- 4. 主流程 ---
@@ -86,16 +90,18 @@ if __name__ == "__main__":
     try:
         # 讀取 Excel
         df = pd.read_excel("./data/surrender.xlsx")
+        #df = df.dropna(subset=['員工姓名'])
+
         # 讀取保護名單
         try:
             protected_df = pd.read_excel("./data/protected.xlsx")
             protected_ids = set(protected_df['身分證字號'].astype(str).str.strip().tolist())
-            logger.info(f"成功加載保護名單，共有 {len(protected_ids)} 位受保護人員。")
+            logger.info(f"🛡️ 成功加載保護名單，共有 {len(protected_ids)} 位受保護人員。")
         except Exception as e:
-            logger.warning(f"未找到保護名單，將不進行過濾。")
+            logger.warning(f"⚠️ 未找到保護名單，將不進行過濾。")
             protected_ids = set()
     except Exception as e:
-        logger.error(f"Excel 讀取失敗: {e}"); exit()
+        logger.error(f"❌ Excel 讀取失敗: {e}"); exit()
 
     chrome_options = Options()
     chrome_options.add_experimental_option("debuggerAddress", "127.0.0.1:9222")
@@ -105,19 +111,39 @@ if __name__ == "__main__":
     driver.get(target_url)
     input("\n🌐 網頁加載後，請在此按『Enter』開始...")
 
-    success_count, failure_count = 0, 0
+    # 初始化計數器
+    success_count = 0
+    failure_count = 0
+    protected_count = 0 # 新增：受保護跳過的計數
 
     for index, row in df.iterrows():
-        emp_name = str(row.get('員工姓名', '未知'))
-        emp_id = str(row.get('身分證字號', '')).strip()
-        
-        # 保護名單檢查
+        # 初始化計數器
+        success_count = 0
+        failure_count = 0
+        protected_count = 0 
+        empty_count = 0 # 新增：空白列計數
+
+        for index, row in df.iterrows():
+            # 取得資料並清洗
+            emp_name = str(row.get('員工姓名', '')).strip()
+            emp_id = str(row.get('身分證字號', '')).strip()
+
+        # --- A. 檢查是否為空白列 (姓名為空或 NaN) ---
+        if not emp_name or emp_name.lower() == 'nan':
+            empty_count += 1
+            # logger.info(f"💨 [跳過] 第 {index+1} 列為空白資料。")
+            continue
+
+        # --- B. 保護名單檢查 ---
         if emp_id in protected_ids:
-            failure_count += 1
-            logger.warning(f"🚫 攔截成功！{emp_name} 位列保護名單，已跳過。")
+            protected_count += 1
+            logger.info(f"⏭️  [跳過] {emp_name} ({emp_id}) 位列保護名單。")
             continue
         
+        # --- 正常執行區塊 ---
         try:
+            logger.info(f"--- 串列 [{index+1}/{len(df)}] 開始處理: {emp_name} ---")
+            
             if driver.current_url != target_url:
                 driver.get(target_url)
             
@@ -133,6 +159,15 @@ if __name__ == "__main__":
         except Exception as e:
             failure_count += 1
             logger.error(f"❌ 流程出錯: {emp_name}，原因: {e}")
-            input("👉 發生錯誤，請手動調整後按『Enter』繼續...")
+            input("👉 發生錯誤，請手動調整後按『Enter』繼續下一筆...")
 
-    logger.info(f"\n任務結束: 成功 {success_count}, 失敗 {failure_count}")
+    # 任務總結
+    logger.info(f"""
+{'='*30}
+任務執行結束統計：
+✅ 成功送出: {success_count} 筆
+🛡️ 保護跳過: {protected_count} 筆
+💨 空白跳過: {empty_count} 筆
+❌ 執行出錯: {failure_count} 筆
+{'='*30}
+    """)

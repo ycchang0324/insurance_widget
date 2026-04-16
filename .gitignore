@@ -11,6 +11,10 @@ data/enrollment.xlsx
 data/surrender.xlsx
 data/protected.xlsx
 
+#忽略 excel 暫存檔
+**/~$*
+data/~*
+
 # 如果你想排除 data 資料夾下所有的 excel，可以取消下面這行的註解
 # data/*.xlsx
 

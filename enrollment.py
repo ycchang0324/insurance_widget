@@ -6,8 +6,12 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+import platform
 
-# 匯入剛移過去的工具函式
+# 自動判定作業系統使用 Command 或 Control
+CMD_KEY = Keys.COMMAND if platform.system() == "Darwin" else Keys.CONTROL
+
+# 匯入工具函式
 from src.utility import convert_to_roc_date, wait_for_spinner_to_disappear
 
 # --- 1. 設定 Log 紀錄配置 ---
@@ -28,7 +32,6 @@ def fill_fubon_enrollment(driver, data):
     try:
         logger.info(f">>> 正在填寫: {data['員工姓名']}")
         
-        # 確保進入頁面時遮罩已消失
         wait_for_spinner_to_disappear(driver)
 
         # A. 員工姓名
@@ -48,58 +51,50 @@ def fill_fubon_enrollment(driver, data):
         id_field.clear()
         id_field.send_keys(str(data['身分證字號']))
 
-        # 確保進入頁面時遮罩已消失
         logger.info(f"身分證字號填寫完成，等待遮罩結束...")
-        # 4. 💡 依照您的要求，執行完後等待遮罩結束
         wait_for_spinner_to_disappear(driver)
 
-        # D. 生日 (使用 JS 點擊避開遮罩)
+        # D. 生日 (JS 點擊)
         b_field = wait.until(EC.presence_of_element_located((By.XPATH, "//label[contains(., '生日')]/ancestor::div[contains(@class, 'ant-form-item')]//input[@name='date']")))
         driver.execute_script("arguments[0].click();", b_field)
-        b_field.send_keys(Keys.COMMAND + "a", Keys.BACKSPACE)
+        b_field.send_keys(CMD_KEY + "a", Keys.BACKSPACE)
         b_field.send_keys(str(data['生日']), Keys.ENTER)
 
-        # --- E. 國籍填寫 (單次 Enter 穩定版) ---
+        # --- E. 國籍填寫 ---
         nationality_display_xpath = "//label[contains(., '國籍')]/ancestor::div[contains(@class, 'ant-form-item')]//div[@class='ant-select-selection-selected-value']"
-        
         target_nation = str(data['國籍']).strip()
         skip_list = ["中華民國", "台灣", "臺灣", "ROC", "R.O.C", "nan", ""]
 
-        # 取得網頁目前的值
         current_web_nation = wait.until(EC.presence_of_element_located((By.XPATH, nationality_display_xpath))).text.strip()
         
         if not (target_nation in skip_list and current_web_nation == "中華民國"):
             logger.info(f"正在修改國籍為: {target_nation}")
-            
-            # 1. 點開下拉選單 (使用 JS 點擊避開攔截)
             trigger = wait.until(EC.presence_of_element_located((By.XPATH, nationality_display_xpath)))
             driver.execute_script("arguments[0].click();", trigger)
 
-            # 2. 定位輸入框並輸入文字
             inp = wait.until(EC.visibility_of_element_located((By.XPATH, "//input[@class='ant-select-search__field']")))
-            
-            # 清除舊內容
-            inp.send_keys(Keys.COMMAND + "a") # Windows 請改 Keys.CONTROL
-            inp.send_keys(Keys.BACKSPACE)
-            
-            # 填入國籍
+            inp.send_keys(CMD_KEY + "a", Keys.BACKSPACE)
             inp.send_keys(target_nation)
-            logger.info(f"已輸入國籍文字: {target_nation}，等待過濾...")
             inp.send_keys(Keys.ENTER)
-            
-            # 4. 💡 依照您的要求，執行完後等待遮罩結束
-            logger.info(f"國籍填寫完成，等待遮罩結束...")
-            # 確保進入頁面時遮罩已消失
             wait_for_spinner_to_disappear(driver)
 
-        # F. 性別
-        gender_val = "M" if "男" in str(data['性別']) else "F"
-        wait.until(EC.element_to_be_clickable((By.XPATH, f"//input[@value='{gender_val}']/ancestor::label"))).click()
+        # F. 性別 (嚴格校驗 + JS 點擊)
+        raw_gender = str(data['性別']).strip().upper()
+        if raw_gender in ["男", "男性", "M"] or (len(raw_gender) > 0 and raw_gender.startswith('M')):
+            gender_val = "M"
+        elif raw_gender in ["女", "女性", "F"] or (len(raw_gender) > 0 and raw_gender.startswith('F')):
+            gender_val = "F"
+        else:
+            raise ValueError(f"性別欄位格式錯誤或空白：'{raw_gender}'")
 
-        # G. 受僱日期 (使用 JS 點擊避開遮罩)
+        gender_radio_xpath = f"//input[@value='{gender_val}']/ancestor::label"
+        gender_element = wait.until(EC.presence_of_element_located((By.XPATH, gender_radio_xpath)))
+        driver.execute_script("arguments[0].click();", gender_element)
+
+        # G. 受僱日期 (JS 點擊)
         h_field = wait.until(EC.presence_of_element_located((By.XPATH, "//label[contains(., '受僱日期')]/ancestor::div[contains(@class, 'ant-form-item')]//input[@name='date']")))
         driver.execute_script("arguments[0].click();", h_field)
-        h_field.send_keys(Keys.COMMAND + "a", Keys.BACKSPACE)
+        h_field.send_keys(CMD_KEY + "a", Keys.BACKSPACE)
         h_field.send_keys(str(data['受僱日期']), Keys.ENTER)
 
         # H. 工作內容
@@ -107,18 +102,22 @@ def fill_fubon_enrollment(driver, data):
         job_field.clear()
         job_field.send_keys(str(data['工作內容']))
 
-        # I. 下一步 (第一頁)
-        wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(., '下一步')]"))).click()
-        wait_for_spinner_to_disappear(driver) # 跳轉後的等待
+        wait_for_spinner_to_disappear(driver)
 
-        # J. 第二頁保險金額
+        # I. 下一步 (第一頁 - 改用 JS 點擊)
+        next_btn = wait.until(EC.presence_of_element_located((By.XPATH, "//button[contains(., '下一步')]")))
+        driver.execute_script("arguments[0].click();", next_btn)
+        wait_for_spinner_to_disappear(driver) 
+
+        # J. 第二頁保險金額 (防呆 nan)
         products = ["GADD", "GMR"]
         for prod in products:
-            if prod in data:
+            val = str(data.get(prod, '')).strip()
+            if val and val.lower() != 'nan':
                 xpath = f"//label[contains(., '{prod}')]/following::input[1]"
                 field = wait.until(EC.presence_of_element_located((By.XPATH, xpath)))
                 field.clear()
-                field.send_keys(str(data[prod]), Keys.TAB)
+                field.send_keys(val, Keys.TAB)
 
         # K. 第二頁下一步 (JS 點擊)
         next_p2 = wait.until(EC.presence_of_element_located((By.XPATH, "//button[contains(text(), '下一步')]")))
@@ -129,12 +128,12 @@ def fill_fubon_enrollment(driver, data):
         # L. 最終確認
         confirm_btn = wait.until(EC.presence_of_element_located((By.XPATH, "//button[contains(text(), '確定')]")))
         driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", confirm_btn)
-        
+
         print(f"\n--- 📋 待確認人員：{data['員工姓名']} ---")
         input("👉 檢查資料後，請在此處按『Enter』正式送出...")
-        
+
         driver.execute_script("arguments[0].click();", confirm_btn)
-        logger.info(f"✅ 手動送出成功: {data['員工姓名']}")
+        logger.info(f"✅ 送出成功: {data['員工姓名']}")
 
     except Exception as e:
         logger.error(f"❌ 填寫出錯: {data.get('員工姓名', '未知')}，原因: {e}")
@@ -145,57 +144,79 @@ if __name__ == "__main__":
     target_url = "https://gis.fubonlife.com.tw/gis-co-web/employeeEnrollment/employeeEnrollmentApplication"
     
     try:
-        # 讀取 Excel 並預處理日期
         df = pd.read_excel("./data/enrollment.xlsx")
+        # 不在這裡 dropna，讓空白列進迴圈計算
+        
+        try:
+            protected_df = pd.read_excel("./data/protected.xlsx")
+            protected_ids = set(protected_df['身分證字號'].astype(str).str.strip().tolist())
+            logger.info(f"🛡️ 保護名單讀取成功，共 {len(protected_ids)} 筆。")
+        except:
+            protected_ids = set()
+            logger.warning("⚠️ 未找到保護名單。")
+
         df['生日'] = df['生日'].apply(convert_to_roc_date)
         df['受僱日期'] = df['受僱日期'].apply(convert_to_roc_date)
         logger.info(f"Excel 讀取完成，共 {len(df)} 筆。")
+        
     except Exception as e:
-        logger.error(f"Excel 讀取失敗: {e}")
-        exit()
+        logger.error(f"Excel 讀取失敗: {e}"); exit()
 
     chrome_options = Options()
     chrome_options.add_experimental_option("debuggerAddress", "127.0.0.1:9222")
     driver = webdriver.Chrome(options=chrome_options)
 
-    success_count, failure_count = 0, 0
+    # 初始化計數器
+    success_count = 0
+    failure_count = 0
+    protected_count = 0
+    empty_count = 0
 
-    # 啟動前置檢查
-    logger.info("正在加載初始頁面...")
     driver.get(target_url)
-    input("👉 網頁就緒後，請在此按『Enter』開始執行自動化...")
+    input("👉 網頁就緒後，請在此按『Enter』開始執行...")
 
     for index, row in df.iterrows():
-        emp_name = str(row.get('員工姓名', '未知'))
-        logger.info(f"--- 串列 [{index+1}/{len(df)}] 開始處理: {emp_name} ---")
+        emp_name = str(row.get('員工姓名', '')).strip()
+        emp_id = str(row.get('身分證字號', '')).strip()
+
+        # 1. 空白檢查
+        if not emp_name or emp_name.lower() == 'nan':
+            empty_count += 1
+            continue
+
+        # 2. 保護名單檢查
+        if emp_id in protected_ids:
+            protected_count += 1
+            logger.info(f"⏭️  [跳過] {emp_name} 位列保護名單。")
+            continue
+
+        logger.info(f"--- 串列 [{index+1}/{len(df)}] 處理中: {emp_name} ---")
         
         try:
-            # 每一筆開始前回到初始頁面
             driver.get(target_url)
-            
-            # 等待關鍵元素出現，確認頁面加載成功
             name_xpath = "//label[contains(., '員工姓名')]/ancestor::div[contains(@class, 'ant-row')]//textarea"
             WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.XPATH, name_xpath)))
             
-            # 執行填寫 (內部已有成功後的 Enter 確認點)
             fill_fubon_enrollment(driver, row)
             success_count += 1
             logger.info(f"🎉 處理完成: {emp_name}")
 
         except Exception as e:
-            # 💡 關鍵改動：失敗時的處理邏輯
             failure_count += 1
             logger.error(f"❌ 填寫失敗: {emp_name}")
-            print(f"\n⚠️ 【錯誤發生】人員：{emp_name}")
-            print(f"原因: {str(e)[:200]}") # 顯示前 200 字的錯誤詳情
-            
-            # 停下來等你檢查網頁
-            print("-" * 30)
-            input("👉 請檢查網頁報錯原因，手動處理後在此按『Enter』跳往下一筆...")
-            print("-" * 30)
+            print(f"\n⚠️ 【錯誤發生】人員：{emp_name}\n原因: {str(e)[:150]}")
+            input("👉 請手動處理後按『Enter』跳往下一筆...")
         
         if index < len(df) - 1:
             logger.info("⏳ 準備切換下一位人員...")
 
     # 任務總結
-    logger.info(f"\n{'='*30}\n加保任務結束\n✅ 成功: {success_count} 筆\n❌ 失敗: {failure_count} 筆\n{'='*30}")
+    logger.info(f"""
+{'='*30}
+加保任務結束統計：
+✅ 成功: {success_count} 筆
+🛡️ 保護跳過: {protected_count} 筆
+💨 空白跳過: {empty_count} 筆
+❌ 失敗: {failure_count} 筆
+{'='*30}
+    """)
