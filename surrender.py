@@ -88,11 +88,7 @@ if __name__ == "__main__":
     target_url = "https://gis.fubonlife.com.tw/gis-co-web/empFamilyPolicyChangeQuery"
     
     try:
-        # 讀取 Excel
         df = pd.read_excel("./data/surrender.xlsx")
-        #df = df.dropna(subset=['員工姓名'])
-
-        # 讀取保護名單
         try:
             protected_df = pd.read_excel("./data/protected.xlsx")
             protected_ids = set(protected_df['身分證字號'].astype(str).str.strip().tolist())
@@ -107,43 +103,37 @@ if __name__ == "__main__":
     chrome_options.add_experimental_option("debuggerAddress", "127.0.0.1:9222")
     driver = webdriver.Chrome(options=chrome_options)
     
-    # 前置確認
     driver.get(target_url)
     input("\n🌐 網頁加載後，請在此按『Enter』開始...")
 
-    # 初始化計數器
+    # --- 初始化計數器 (移到迴圈外) ---
     success_count = 0
     failure_count = 0
-    protected_count = 0 # 新增：受保護跳過的計數
+    protected_count = 0 
+    empty_count = 0 
 
+    # --- 單層迴圈處理 ---
     for index, row in df.iterrows():
-        # 初始化計數器
-        success_count = 0
-        failure_count = 0
-        protected_count = 0 
-        empty_count = 0 # 新增：空白列計數
+        emp_name = str(row.get('員工姓名', '')).strip()
+        emp_id = str(row.get('身分證字號', '')).strip()
 
-        for index, row in df.iterrows():
-            # 取得資料並清洗
-            emp_name = str(row.get('員工姓名', '')).strip()
-            emp_id = str(row.get('身分證字號', '')).strip()
-
-        # --- A. 檢查是否為空白列 (姓名為空或 NaN) ---
+        # A. 檢查是否為空白列
         if not emp_name or emp_name.lower() == 'nan':
             empty_count += 1
-            # logger.info(f"💨 [跳過] 第 {index+1} 列為空白資料。")
+            logger.info(f"💨 [跳過] 第 {index+1} 列為空白資料。")
             continue
 
-        # --- B. 保護名單檢查 ---
+        # B. 保護名單檢查
         if emp_id in protected_ids:
             protected_count += 1
             logger.info(f"⏭️  [跳過] {emp_name} ({emp_id}) 位列保護名單。")
             continue
         
-        # --- 正常執行區塊 ---
+        # C. 正常執行區塊
         try:
             logger.info(f"--- 串列 [{index+1}/{len(df)}] 開始處理: {emp_name} ---")
             
+            # 回到初始頁面
             if driver.current_url != target_url:
                 driver.get(target_url)
             
@@ -159,9 +149,9 @@ if __name__ == "__main__":
         except Exception as e:
             failure_count += 1
             logger.error(f"❌ 流程出錯: {emp_name}，原因: {e}")
-            input("👉 發生錯誤，請手動調整後按『Enter』繼續下一筆...")
+            input("👉 發生錯誤，請手動調整網頁至首頁後，按『Enter』繼續下一筆...")
 
-    # 任務總結
+    # 任務總結 (此處縮排需在迴圈外)
     logger.info(f"""
 {'='*30}
 任務執行結束統計：
