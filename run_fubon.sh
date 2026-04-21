@@ -17,8 +17,8 @@ echo "=================================================="
 # 1. 啟動 Google Chrome
 "$CHROME_PATH" --remote-debugging-port=$DEBUG_PORT --user-data-dir="$USER_DATA_DIR" > /dev/null 2>&1 &
 
-echo "⏳ 等待 Chrome 啟動中 (1秒)..."
-sleep 1
+echo "⏳ 等待 Chrome 啟動中 (3秒)..."
+sleep 3
 
 # 2. 檢查 Chrome 是否成功開啟埠位
 if lsof -Pi :$DEBUG_PORT -sTCP:LISTEN -t >/dev/null ; then

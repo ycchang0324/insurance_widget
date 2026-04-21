@@ -21,6 +21,7 @@ FULL_TARGET_PATH = os.path.join(DOWNLOAD_DIR, TARGET_FILENAME)
 
 ENROLL_FILE = "./data/enrollment.xlsx"
 PROTECTED_FILE = "./data/protected.xlsx"
+SURRENDER_FILE = "./data/surrender.xlsx"
 
 if not os.path.exists(DOWNLOAD_DIR):
     os.makedirs(DOWNLOAD_DIR)
@@ -97,71 +98,96 @@ def click_and_download(driver):
         return False
 
 # --- 4. 交叉比對邏輯 ---
-
 def run_comparison(mode):
     today_str = datetime.now().strftime("%Y-%m-%d")
     logger.info(f"📊 開始執行【{mode}】名單比對 - 日期: {today_str}")
     
     try:
-        # 讀取並排除 nan
-        df_source = pd.read_excel(ENROLL_FILE).dropna(subset=['員工姓名', '身分證字號'], how='any')
+        # 1. 根據模式選取來源檔案 (加保 vs 退保)
+        CURRENT_SOURCE = ENROLL_FILE if mode == "加保" else SURRENDER_FILE
+        
+        df_source = pd.read_excel(CURRENT_SOURCE).dropna(subset=['員工姓名', '身分證字號'], how='any')
         df_query = pd.read_excel(FULL_TARGET_PATH).dropna(subset=['被保險人姓名', '身分證字號/居留證號碼'], how='any')
         
+        # 讀取保護名單
         try:
             df_prot = pd.read_excel(PROTECTED_FILE).dropna(subset=['身分證字號'])
             prot_ids = set(df_prot['身分證字號'].astype(str).str.strip().tolist())
         except:
             prot_ids = set()
 
-        p_list, s_list, f_list = [], [], []
+        # 收集當前模式的所有來源 ID (用於反向稽核)
+        current_source_ids = set(df_source['身分證字號'].astype(str).str.strip().tolist())
 
+        # 容器初始化 (移除 m_list)
+        p_list, s_list, f_list, unknown_list = [], [], [], []
+
+        # --- A. 正向比對：Source -> Query ---
         for _, row in df_source.iterrows():
             name = str(row.get('員工姓名', '')).strip()
             id_no = str(row.get('身分證字號', '')).strip()
             if not name or name.lower() == 'nan': continue
 
-            # 遮罩後的身分證 (用於顯示)
-            display_id = mask_id(id_no)
+            display_info = f"{name} ({mask_id(id_no)})"
 
-            # 1. 保護名單檢查
             if id_no in prot_ids:
-                p_list.append(f"{name} ({display_id})")
+                p_list.append(display_info)
                 continue
 
-            # 2. 異動結果比對
-            match_type = "加保" if mode == "加保" else "退保"
-            query_matches = df_query[df_query['作業別'].str.contains(match_type, na=False)]
-            
             is_success = False
-            for _, q_row in query_matches.iterrows():
+            
+            # 只與 query 中符合當前 mode 的紀錄比對
+            for _, q_row in df_query.iterrows():
+                q_action = str(q_row.get('作業別', ''))
+                
+                # 僅篩選完全符合當前模式的作業
+                if mode not in q_action:
+                    continue
+
                 q_name = str(q_row.get('被保險人姓名', '')).strip()
                 q_id_masked = str(q_row.get('身分證字號/居留證號碼', '')).strip()
-                if q_name.lower() == 'nan': continue
-
+                
                 if name == q_name and check_id_match(id_no, q_id_masked):
                     is_success = True
-                    break
+                    break # 找到一筆成功紀錄即可
+
+            if is_success: 
+                s_list.append(display_info)
+            else: 
+                f_list.append(display_info)
+
+        # --- B. 反向稽核：Query -> Source ---
+        for _, q_row in df_query.iterrows():
+            q_action = str(q_row.get('作業別', ''))
+            if mode not in q_action: 
+                continue
+
+            q_name = str(q_row.get('被保險人姓名', '')).strip()
+            q_id_masked = str(q_row.get('身分證字號/居留證號碼', '')).strip()
             
-            if is_success:
-                s_list.append(f"{name} ({display_id})")
-            else:
-                f_list.append(f"{name} ({display_id})")
+            is_in_source = any(check_id_match(sid, q_id_masked) for sid in current_source_ids)
+            
+            if not is_in_source:
+                entry = f"{q_name} ({q_id_masked}) [作業別: {q_action}]"
+                if entry not in unknown_list:
+                    unknown_list.append(entry)
 
         # --- 顯示與 Log 記錄結果 ---
-        summary_title = f"\n{'='*20} {today_str} 【{mode}】比對報表 {'='*20}"
-        logger.info(summary_title)
+        logger.info(f"\n{'='*20} {today_str} 【{mode}】比對報表 {'='*20}")
         
-        prot_msg = f"🛡️  保護名單 (跳過): {len(p_list)} 位"
-        logger.info(prot_msg)
-        for p in p_list: logger.info(f"   - [保護] {p}")
+        if p_list:
+            logger.info(f"🛡️  保護名單: {len(p_list)} 位")
+            for p in p_list: logger.info(f"   - [保護] {p}")
+
+        if unknown_list:
+            logger.error(f"🚨 異常名單 (不在{mode}來源名單中，卻出現在查詢結果): {len(unknown_list)} 位")
+            for u in unknown_list: logger.error(f"   - {u}")
         
-        succ_msg = f"✅ 成功完成{mode}: {len(s_list)} 位"
-        logger.info(succ_msg)
+        logger.info(f"✅ 成功完成{mode}: {len(s_list)} 位")
         for s in s_list: logger.info(f"   - [成功] {s}")
         
-        fail_msg = f"❌ 未成功{mode} (查無記錄): {len(f_list)} 位"
-        logger.info(fail_msg)
-        for f in f_list: logger.info(f"   - [失敗] {f}")
+        logger.info(f"❌ 未成功{mode} (名單內有但查無記錄): {len(f_list)} 位")
+        for f in f_list: logger.info(f"   - [未完成] {f}")
         
         logger.info("="*60 + "\n")
 
