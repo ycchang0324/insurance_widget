@@ -143,10 +143,9 @@ def fill_fubon_enrollment(driver, data):
 if __name__ == "__main__":
     target_url = "https://gis.fubonlife.com.tw/gis-co-web/employeeEnrollment/employeeEnrollmentApplication"
     
+    # 1. 讀取資料 (保持不變)
     try:
         df = pd.read_excel("./data/enrollment.xlsx")
-        # 不在這裡 dropna，讓空白列進迴圈計算
-        
         try:
             protected_df = pd.read_excel("./data/protected.xlsx")
             protected_ids = set(protected_df['身分證字號'].astype(str).str.strip().tolist())
@@ -158,33 +157,51 @@ if __name__ == "__main__":
         df['生日'] = df['生日'].apply(convert_to_roc_date)
         df['受僱日期'] = df['受僱日期'].apply(convert_to_roc_date)
         logger.info(f"Excel 讀取完成，共 {len(df)} 筆。")
-        
     except Exception as e:
         logger.error(f"Excel 讀取失敗: {e}"); exit()
 
+    # 2. 初始化 Driver
     chrome_options = Options()
     chrome_options.add_experimental_option("debuggerAddress", "127.0.0.1:9222")
     driver = webdriver.Chrome(options=chrome_options)
 
-    # 初始化計數器
+    # 3. 初始化計數器
     success_count = 0
     failure_count = 0
     protected_count = 0
     empty_count = 0
 
-    driver.get(target_url)
-    input("👉 網頁就緒後，請在此按『Enter』開始執行...")
+    # 4. 【補強導航】只寫一次即可
+    try:
+        handles = driver.window_handles
+        fubon_found = False
+        for h in handles:
+            driver.switch_to.window(h)
+            if "gis.fubonlife.com.tw" in driver.current_url:
+                fubon_found = True
+                break
+        
+        if not fubon_found:
+            driver.switch_to.window(handles[-1])
 
+        logger.info(f"正在導航至: {target_url}")
+        driver.execute_script(f"window.location.href = '{target_url}';")
+
+    except Exception as e:
+        logger.error(f"連線或切換分頁失敗: {e}"); exit()
+
+    # 只保留這一個確認點
+    input("👉 網頁就緒後（確認看到填寫畫面），請在此按『Enter』正式開始執行...")
+
+    # 5. 開始迴圈處理
     for index, row in df.iterrows():
         emp_name = str(row.get('員工姓名', '')).strip()
         emp_id = str(row.get('身分證字號', '')).strip()
 
-        # 1. 空白檢查
         if not emp_name or emp_name.lower() == 'nan':
             empty_count += 1
             continue
 
-        # 2. 保護名單檢查
         if emp_id in protected_ids:
             protected_count += 1
             logger.info(f"⏭️  [跳過] {emp_name} 位列保護名單。")
@@ -193,9 +210,12 @@ if __name__ == "__main__":
         logger.info(f"--- 串列 [{index+1}/{len(df)}] 處理中: {emp_name} ---")
         
         try:
-            driver.get(target_url)
+            # 確保頁面在正確位置
+            if target_url not in driver.current_url:
+                driver.execute_script(f"window.location.href = '{target_url}';")
+            
             name_xpath = "//label[contains(., '員工姓名')]/ancestor::div[contains(@class, 'ant-row')]//textarea"
-            WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.XPATH, name_xpath)))
+            WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, name_xpath)))
             
             fill_fubon_enrollment(driver, row)
             success_count += 1
@@ -205,7 +225,7 @@ if __name__ == "__main__":
             failure_count += 1
             logger.error(f"❌ 填寫失敗: {emp_name}")
             print(f"\n⚠️ 【錯誤發生】人員：{emp_name}\n原因: {str(e)[:150]}")
-            input("👉 請手動處理後按『Enter』跳往下一筆...")
+            input("👉 請在網頁手動點回「加保申請頁面」後，在此按『Enter』繼續下一筆...")
         
         if index < len(df) - 1:
             logger.info("⏳ 準備切換下一位人員...")

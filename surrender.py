@@ -1,3 +1,5 @@
+import sys
+
 import pandas as pd
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
@@ -103,8 +105,29 @@ if __name__ == "__main__":
     chrome_options.add_experimental_option("debuggerAddress", "127.0.0.1:9222")
     driver = webdriver.Chrome(options=chrome_options)
     
-    driver.get(target_url)
-    input("\n🌐 網頁加載後，請在此按『Enter』開始...")
+    # 【關鍵補強 1】：確保 Selenium 盯著正確的 Page 分頁
+    try:
+        # 尋找現有的富邦分頁，如果找不到就用最後一個
+        handles = driver.window_handles
+        fubon_found = False
+        for h in handles:
+            driver.switch_to.window(h)
+            if "fubonlife.com.tw" in driver.current_url:
+                fubon_found = True
+                break
+        
+        if not fubon_found:
+            driver.switch_to.window(handles[-1]) # 切換到最後一個可用的標籤頁
+            
+        # 【關鍵補強 2】：使用 JavaScript 強制導航，繞過 driver.get 可能的掛起
+        logger.info(f"正在前往: {target_url}")
+        driver.execute_script(f"window.location.href = '{target_url}';")
+        
+    except Exception as e:
+        logger.error(f"連線或導航失敗: {e}")
+        sys.exit(1)
+
+    input("\n🌐 網頁加載後，請在此按『Enter』開始執行退保作業...")
 
     # --- 初始化計數器 (移到迴圈外) ---
     success_count = 0
@@ -133,9 +156,10 @@ if __name__ == "__main__":
         try:
             logger.info(f"--- 串列 [{index+1}/{len(df)}] 開始處理: {emp_name} ---")
             
-            # 回到初始頁面
-            if driver.current_url != target_url:
-                driver.get(target_url)
+            # 【關鍵補強 3】：迴圈內回到初始頁面也要改用 JS 或檢查
+            if target_url not in driver.current_url:
+                driver.execute_script(f"window.location.href = '{target_url}';")
+                wait_for_spinner_to_disappear(driver)
             
             confirm_btn = fill_fubon_surrender(driver, row)
             
