@@ -1,3 +1,5 @@
+import time
+
 import pandas as pd
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
@@ -109,15 +111,43 @@ def fill_fubon_enrollment(driver, data):
         driver.execute_script("arguments[0].click();", next_btn)
         wait_for_spinner_to_disappear(driver) 
 
-        # J. 第二頁保險金額 (防呆 nan)
+        # J. 第二頁保險金額 (處理 100.0 -> 100 並繞過遮罩)
         products = ["GADD", "GMR"]
         for prod in products:
-            val = str(data.get(prod, '')).strip()
-            if val and val.lower() != 'nan':
+            raw_val = data.get(prod, '')
+            
+            # 1. 檢查是否為 NaN 或空值
+            if str(raw_val).lower() == 'nan' or raw_val is None or str(raw_val).strip() == '':
+                continue
+                
+            # 2. 格式化數值：將 100.0 轉為 100
+            try:
+                # 透過 float -> int -> str 的轉換路徑去掉小數點
+                clean_val = str(int(float(raw_val)))
+            except (ValueError, TypeError):
+                # 如果是純文字則保持原樣
+                clean_val = str(raw_val).strip()
+
+            # 3. 執行填寫
+            try:
                 xpath = f"//label[contains(., '{prod}')]/following::input[1]"
+                # 使用 presence 確保抓到元素即可，不必管它有沒有被遮罩擋住
                 field = wait.until(EC.presence_of_element_located((By.XPATH, xpath)))
-                field.clear()
-                field.send_keys(val, Keys.TAB)
+                
+                # 使用 JavaScript 直接塞值並觸發網頁事件
+                driver.execute_script("""
+                    arguments[0].value = arguments[1];
+                    arguments[0].dispatchEvent(new Event('input', { bubbles: true }));
+                    arguments[0].dispatchEvent(new Event('change', { bubbles: true }));
+                """, field, clean_val)
+                
+                # 補一個 TAB 鍵確保觸發頁面原本的計算邏輯（如果有）
+                field.send_keys(Keys.TAB)
+                
+                logger.info(f"✅ {prod} 填寫成功: {clean_val}")
+                
+            except Exception as e:
+                logger.error(f"❌ 填寫 {prod} 時發生錯誤: {e}")
 
         # K. 第二頁下一步 (JS 點擊)
         next_p2 = wait.until(EC.presence_of_element_located((By.XPATH, "//button[contains(text(), '下一步')]")))
@@ -146,13 +176,33 @@ if __name__ == "__main__":
     # 1. 讀取資料 (保持不變)
     try:
         df = pd.read_excel("./data/enrollment.xlsx")
+        # 強化保護名單讀取：增加標準化處理
         try:
-            protected_df = pd.read_excel("./data/protected.xlsx")
-            protected_ids = set(protected_df['身分證字號'].astype(str).str.strip().tolist())
+            protected_df = pd.read_excel("./data/protected.xlsx").dropna(subset=['身分證字號'])
+            protected_ids = set(
+                protected_df['身分證字號']
+                .astype(str)
+                .str.strip()
+                .str.upper() # 確保大小寫一致
+                .tolist()
+            )
             logger.info(f"🛡️ 保護名單讀取成功，共 {len(protected_ids)} 筆。")
         except:
             protected_ids = set()
             logger.warning("⚠️ 未找到保護名單。")
+
+        # --- 新增：啟動前的視覺化提醒 ---
+        # 檢查 Excel 裡的人有哪些在保護名單
+        to_be_protected = df[df['身分證字號'].astype(str).str.strip().str.upper().isin(protected_ids)]
+        
+        if not to_be_protected.empty:
+            print("\n" + "!"*60)
+            logger.warning(f"🚨 注意：偵測到加保名單中有 {len(to_be_protected)} 位人員處於【保護名單】中：")
+            for _, p_row in to_be_protected.iterrows():
+                print(f"   - [受保護] {p_row['員工姓名']} ({p_row['身分證字號']})")
+            logger.warning("👉 以上人員將會被自動跳過，請確保您已完成他們的手動加保。")
+            print("!"*60 + "\n")
+            time.sleep(2) # 留一點時間讓你閱讀
 
         df['生日'] = df['生日'].apply(convert_to_roc_date)
         df['受僱日期'] = df['受僱日期'].apply(convert_to_roc_date)
@@ -196,7 +246,8 @@ if __name__ == "__main__":
     # 5. 開始迴圈處理
     for index, row in df.iterrows():
         emp_name = str(row.get('員工姓名', '')).strip()
-        emp_id = str(row.get('身分證字號', '')).strip()
+        # 修正：比對時也轉大寫
+        emp_id = str(row.get('身分證字號', '')).strip().upper()
 
         if not emp_name or emp_name.lower() == 'nan':
             empty_count += 1
@@ -204,7 +255,8 @@ if __name__ == "__main__":
 
         if emp_id in protected_ids:
             protected_count += 1
-            logger.info(f"⏭️  [跳過] {emp_name} 位列保護名單。")
+            # 改為 warning 讓顏色在終端機更顯眼
+            logger.warning(f"⏭️  [跳過保護人員] {emp_name} ({emp_id})")
             continue
 
         logger.info(f"--- 串列 [{index+1}/{len(df)}] 處理中: {emp_name} ---")
