@@ -3,7 +3,7 @@
 # --- 設定變數 ---
 CHROME_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 DEBUG_PORT=9222
-USER_DATA_DIR="$HOME/ChromeProfile"
+USER_DATA_DIR="/tmp/chrome_automation"
 
 # Python 檔案名稱
 LOGIN_FILE="fubon_login.py"
