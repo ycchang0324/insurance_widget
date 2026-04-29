@@ -10,7 +10,7 @@ venv/
 data/enrollment.xlsx
 data/surrender.xlsx
 data/protected.xlsx
-data/query.xlsx
+data/downloads/
 
 #忽略 excel 暫存檔
 **/~$*

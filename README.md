@@ -11,7 +11,7 @@
 
 ## ✨ 功能亮點
 
-* **一鍵環境初始化**：透過 Bash 腳本自動開啟具備遠端除錯模式的 Chrome，並配置獨立的使用者設定檔。
+* **一鍵環境初始化**：自動開啟具備遠端除錯模式的 Chrome，並配置獨立的使用者設定檔。
 * **自動化登入輔助**：自動填寫保單序號、身分證字號及密碼，並智慧偵測登入狀態。
 * **互動式任務選單**：登入成功後可直接在終端機選擇執行「加保」或「退保」任務。
 * **民國年自動轉換**：內建工具函式，將 Excel 西元日期自動轉為系統要求的 `115/04/03` 格式。
@@ -36,7 +36,6 @@ pip3 install requirements.txt
 FUBON_POLICY_NO=您的保單號碼-序號
 FUBON_USER_ACCOUNT=您的身分證字號
 FUBON_USER_PASSWORD=您的登入密碼
-FUBON_DOWNLOAD_PATH="/Users/你的使用者名稱/desktop/insurance/data" (今日加退保資料)
 ```
 
 ---
@@ -52,7 +51,8 @@ insurance/
 │   ├── 📄 surrender_example.xlsx   # 💡 退保 Excel 範本 (供參考格式)
 │   ├── 📄 protected.xlsx           # [🔒 隱私] 保護名單 (名單內成員不可退保)
 │   ├── 📄 protected_example.xlsx   # 💡 保護名單範本
-│   └── 📄 query.xlsx               # [🔒 隱私] 今日加退保名單
+│   └──📁 downloads/                # 加退保紀錄資料夾
+│      └── 📄 query.xlsx            # [🔒 隱私] 當日加退保紀錄檔案
 ├── 📁 log/                         # 系統日誌紀錄
 │   ├── 📄 execution_login.log      # 登入過程紀錄
 │   ├── 📄 execution_enrollment.log # 自動生成的加保執行過程與錯誤紀錄
@@ -65,8 +65,8 @@ insurance/
 ├── 🐍 surrender.py                 # 核心腳本：員工退保自動化流程
 ├── 🐍 query_today.py               # 核心腳本：員工退保自動化流程
 ├── 📄 .env                         # [🔒 隱私] 登入資訊及環境變數
-├── 📄 .env_example                 # 登入資訊及環境變數範本
-├── 🐚 run_fubon.sh                 # 啟動腳本：一鍵開啟 Chrome 與執行任務
+├── 📄 .env_example                 # 登入資訊
+├── 🐍 main.py                      # 啟動腳本：一鍵開啟 Chrome 與執行任務
 ├── 📝 README.md                    # 專案說明文件與使用指南
 ├── 📋 requirements.txt             # 專案依賴套件清單 (pip install)
 └── 🚫 .gitignore                   # Git 忽略設定 (確保敏感個資不外流)
@@ -110,7 +110,7 @@ insurance/
 
 2. 在終端機中，執行啟動腳本：
 ```bash
-   bash run_fubon.sh
+   python3 main.py
 ```
 
 此腳本會依序執行：

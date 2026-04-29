@@ -14,27 +14,31 @@ from selenium.webdriver.support import expected_conditions as EC
 load_dotenv()
 
 # --- 1. 路徑與配置 ---
-DEFAULT_PATH = os.path.join(os.path.expanduser("~"), "Desktop", "FubonDownload")
-DOWNLOAD_DIR = os.getenv("FUBON_DOWNLOAD_PATH", DEFAULT_PATH)
+current_dir = os.path.dirname(os.path.abspath(__file__))
+DOWNLOAD_DIR = os.path.join(current_dir, "data", "downloads")
+LOG_DIR = os.path.join(current_dir, "log")
+
+# 確保資料夾存在
+os.makedirs(LOG_DIR, exist_ok=True)
+os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+
+# 檔案路徑
 TARGET_FILENAME = "query.xlsx"
 FULL_TARGET_PATH = os.path.join(DOWNLOAD_DIR, TARGET_FILENAME)
+ENROLL_FILE = os.path.join(current_dir, "data", "enrollment.xlsx")
+PROTECTED_FILE = os.path.join(current_dir, "data", "protected.xlsx")
+SURRENDER_FILE = os.path.join(current_dir, "data", "surrender.xlsx")
 
-ENROLL_FILE = "./data/enrollment.xlsx"
-PROTECTED_FILE = "./data/protected.xlsx"
-SURRENDER_FILE = "./data/surrender.xlsx"
-
-if not os.path.exists(DOWNLOAD_DIR):
-    os.makedirs(DOWNLOAD_DIR)
-
-# Log 配置 (確保會寫入檔案與終端機)
+# --- 設定 Logging ---
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler("./log/execution_query.log", encoding="utf-8"),
+        logging.FileHandler(os.path.join(LOG_DIR, "execution_query.log"), encoding="utf-8"),
         logging.StreamHandler()
     ]
 )
+# 🚨 關鍵點：在這裡定義全域 logger，這樣下面的 click_and_download 等函式才抓得到它
 logger = logging.getLogger(__name__)
 
 # --- 2. 輔助工具 ---
@@ -98,7 +102,6 @@ def click_and_download(driver):
         return False
 
 # --- 4. 交叉比對邏輯 ---
-# --- 4. 交叉比對邏輯 (包含保護名單手動提醒) ---
 def run_comparison(mode):
     today_str = datetime.now().strftime("%Y-%m-%d")
     logger.info(f"📊 開始執行【{mode}】名單比對 - 日期: {today_str}")
@@ -109,19 +112,13 @@ def run_comparison(mode):
         df_source = pd.read_excel(CURRENT_SOURCE).dropna(subset=['身分證字號'])
         df_query = pd.read_excel(FULL_TARGET_PATH).dropna(subset=['身分證字號/居留證號碼'])
 
-        # 2. 讀取保護名單並標準化
+        # 2. 讀取保護名單
         try:
             df_prot = pd.read_excel(PROTECTED_FILE).dropna(subset=['身分證字號'])
-            prot_ids = set(
-                df_prot['身分證字號']
-                .astype(str)
-                .str.strip()
-                .str.upper()
-                .tolist()
-            )
+            prot_ids = set(df_prot['身分證字號'].astype(str).str.strip().str.upper().tolist())
             logger.info(f"🛡️  載入保護名單共 {len(prot_ids)} 筆紀錄")
         except Exception as e:
-            logger.warning(f"⚠️ 無法讀取保護名單: {e}，將繼續執行一般比對。")
+            logger.warning(f"⚠️ 無法讀取保護名單: {e}")
             prot_ids = set()
 
         # 3. 整理 Query 資料庫
@@ -137,19 +134,16 @@ def run_comparison(mode):
 
         p_list, s_list, f_list, unknown_list = [], [], [], []
 
-        # --- A. 正向比對：從 Source 出發 ---
         for _, row in df_source.iterrows():
             name = str(row.get('員工姓名', '未知')).strip()
             id_no = str(row.get('身分證字號', '')).strip().upper()
             display_info = f"{name} ({mask_id(id_no)})"
 
-            # 優先檢查保護名單：如果命中了，加入 p_list 並跳過自動比對
             if id_no in prot_ids:
                 p_list.append(display_info)
                 continue 
 
             matches = [q for q in query_db if check_id_match(id_no, q['id'])]
-
             if not matches:
                 f_list.append(display_info)
             elif len(matches) == 1:
@@ -163,53 +157,44 @@ def run_comparison(mode):
                 else:
                     f_list.append(f"{display_info} (ID重複且姓名不符)")
 
-        # --- B. 反向稽核 ---
         for q in query_db:
             if not q['matched']:
                 unknown_list.append(f"{q['name']} ({q['id']}) [{q['action']}]")
 
-        # --- 顯示最後報表 ---
+        # --- 顯示報表 ---
         logger.info(f"\n{'='*20} {today_str} 【{mode}】比對報表 {'='*20}")
-        
-        # 強化保護名單提醒邏輯
         if p_list:
-            logger.warning(f"⚠️  【注意】以下 {len(p_list)} 位人員在保護名單中，程式已跳過自動比對。")
-            logger.warning(f"👉  請務必手動確認這 {len(p_list)} 位人員是否已正確完成{mode}：")
-            for p in p_list: 
-                logger.warning(f"   - [待手動確認] {p}")
-            print("-" * 30)
-
+            logger.warning(f"⚠️  以下 {len(p_list)} 位人員在保護名單中，請手動確認：")
+            for p in p_list: logger.warning(f"   - [待確認] {p}")
+        
         if unknown_list:
-            logger.error(f"🚨 異常名單 (來源名單無此人，系統卻有紀錄): {len(unknown_list)} 位")
-            for u in unknown_list: logger.error(f"   - [系統多出的紀錄] {u}")
+            logger.error(f"🚨 異常名單 (系統多出的紀錄): {len(unknown_list)} 位")
+            for u in unknown_list: logger.error(f"   - {u}")
         
         logger.info(f"✅ 自動比對成功: {len(s_list)} 位")
-        
         if f_list:
-            logger.info(f"❌ 自動比對失敗 (查無記錄或資料異常): {len(f_list)} 位")
+            logger.info(f"❌ 自動比對失敗: {len(f_list)} 位")
             for f in f_list: logger.info(f"   - [未完成] {f}")
         
-        logger.info("="*60 + "\n")
-
     except Exception as e:
         logger.error(f"❌ 比對出錯: {e}")
 
 # --- 5. 主流程 ---
-
 if __name__ == "__main__":
     target_url = "https://gis.fubonlife.com.tw/gis-co-web/employeeFamilyToday/employeeFamilyTodayResultTable"
     
     chrome_options = Options()
     chrome_options.add_experimental_option("debuggerAddress", "127.0.0.1:9222")
-    driver = webdriver.Chrome(options=chrome_options)
-
+    
     try:
+        driver = webdriver.Chrome(options=chrome_options)
         handles = driver.window_handles
         found = False
         for h in handles:
             driver.switch_to.window(h)
             if "fubonlife.com.tw" in driver.current_url:
-                found = True; break
+                found = True
+                break
         if not found: driver.switch_to.window(handles[-1])
 
         logger.info(f"🚀 正在強制跳轉至: {target_url}")
@@ -218,23 +203,25 @@ if __name__ == "__main__":
         WebDriverWait(driver, 15).until(
             EC.presence_of_element_located((By.CLASS_NAME, "query__table-wrap"))
         )
-    except Exception as e:
-        logger.error(f"❌ 導航失敗: {e}")
 
-    print(f"\n📊 今日日期: {datetime.now().strftime('%Y-%m-%d')}")
-    print("="*60)
-    print(" 📢 【 今日異動查詢比對工具 】")
-    print("="*60)
+        print(f"\n📊 今日日期: {datetime.now().strftime('%Y-%m-%d')}")
+        print("="*60)
+        print(" 📢 【 今日異動查詢比對工具 】")
+        print("="*60)
 
-    input("\n👉 確認網頁已出現資料後，按『Enter』執行下載並比對...")
+        input("\n👉 確認網頁已出現資料後，按『Enter』執行下載並比對...")
 
-    if click_and_download(driver):
-        choice = input("\n👉 請選擇項目 [1] 加保  [2] 退保: ")
-        if choice == "1":
-            run_comparison("加保")
-        elif choice == "2":
-            run_comparison("退保")
+        if click_and_download(driver):
+            choice = input("\n👉 請選擇項目 [1] 加保  [2] 退保: ")
+            if choice == "1":
+                run_comparison("加保")
+            elif choice == "2":
+                run_comparison("退保")
+            else:
+                print("👋 取消動作。")
         else:
-            print("👋 取消動作。")
-    else:
-        print("❌ 下載或更名失敗。")
+            print("❌ 下載或更名失敗。")
+
+    except Exception as e:
+        # 這裡原本報錯是因為 logger 沒定義，現在定義在上面了
+        logger.error(f"❌ 發生錯誤: {e}")
