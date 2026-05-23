@@ -25,9 +25,9 @@
 ## 🚀 環境設定
 
 ### 1. 必要套件
-請確保已安裝 Python 3.8+ 以及 Chrome 瀏覽器，並執行以下指令安裝依賴庫：
+請確保已安裝 Python 3.11 以及 Chrome 瀏覽器，並執行以下指令安裝依賴庫：
 ```bash
-pip3 install requirements.txt
+pip3 install -r requirements.txt
 ```
 
 ### 2. 環境變數設定 (.env)
